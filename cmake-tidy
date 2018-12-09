@@ -1,0 +1,201 @@
+#!/usr/bin/python3
+
+
+# MIT License
+#
+# Copyright (c) 2018 Daniel Mach
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
+"""
+Clean up CMakeLists.txt files:
+
+
+* convert all commands to lower case
+* remove spaces between commands and parenheses
+* remove arguments in else and endif commands
+* fix indentation
+"""
+
+
+import argparse
+import re
+
+
+class CMakeTidy(object):
+    COMMANDS_CONDITIONS = ["if", "elseif", "else", "endif"]
+    COMMANDS_CLEAN_ARGS = ["else", "endif"]
+    INDENT = 4
+    RE_COMMAND = re.compile(r'^\s*(?P<command>\w+)\s*\((?P<args>.*[^)]?)\)?\w*$', re.VERBOSE)
+
+    def __init__(self, path):
+        self._path = path
+
+    def get_command(self, line):
+        """
+        Return command name in lower case.
+        If the line doesn't contain a command, return None.
+        """
+        match = self.RE_COMMAND.match(line)
+        if not match:
+            return None
+        return match.groupdict()["command"].lower()
+
+    def fix_command(self, line):
+        """
+        Convert command name to lower case.
+        Remove extra spaces around parenthesis.
+        Remove arguments in else and endif commands.
+        """
+        command = self.get_command(line)
+        if command in self.COMMANDS_CLEAN_ARGS:
+            return self.RE_COMMAND.sub(command + "()", line)
+        return self.RE_COMMAND.sub(command + r"(\g<args>", line)
+
+    def has_trailing_parenthesis(self, line):
+        """
+        Determine if a line has a trailing parenthesis: )
+        """
+        return line.strip().endswith(")")
+
+    def is_blank_line(self, line):
+        """
+        Determine if a line is blank.
+        """
+        return not line.strip()
+
+    def is_comment_line(self, line):
+        """
+        Determine if a line contains comment.
+        """
+        return line.strip().startswith("#")
+
+    def check_unindent(self, indent, line, result):
+        """
+        Check if it's safe to un-indent.
+        """
+        if indent >= self.INDENT:
+            return
+        msg = "Indentation error"
+        msg += "\nresult: %s" % "\n".join(result)
+        msg += "\nline: %s" % line
+        raise ValueError(msg)
+
+    def tidy(self):
+        """
+        Read input file and return list of tidied lines.
+        """
+        result = []
+        indent = 0
+        data = open(self._path, "r").read()
+        for line in data.splitlines():
+            command = self.get_command(line)
+
+            # empty lines
+            if self.is_blank_line(line):
+                result.append("")
+                continue
+
+            # comments
+            if self.is_comment_line(line):
+                line = line.strip()
+                result.append("%s%s" % (" " * indent, line))
+                continue
+
+            # commands
+            if command:
+                if command in self.COMMANDS_CONDITIONS and command != "if":
+                    self.check_unindent(indent, line, result)
+                    indent -= self.INDENT
+
+                result.append("%s%s" % (" " * indent, self.fix_command(line)))
+
+                if command in self.COMMANDS_CONDITIONS and command != "endif":
+                    indent += self.INDENT
+                elif not self.has_trailing_parenthesis(line):
+                    indent += self.INDENT
+
+                continue
+
+            # remaining lines
+            line = line.strip()
+            if self.has_trailing_parenthesis(line):
+                if line[:-1].strip():
+                    result.append("%s%s" % (" " * indent, line[:-1]))
+                self.check_unindent(indent, line, result)
+                indent -= self.INDENT
+                result.append("%s%s" % (" " * indent, ")"))
+            else:
+                result.append("%s%s" % (" " * indent, line))
+
+        # add newline at the end of the file
+        if result and result[-1] != "":
+            result.append("")
+
+        return result
+
+    def print(self):
+        """
+        Print output to stdout.
+        """
+        result = self.tidy()
+        print("\n".join(result))
+
+    def write(self, path=None):
+        """
+        Write output to a file.
+        If file is not specified, rewrite the source file.
+        """
+        path = path or self._path
+        result = self.tidy()
+        open(path, "w").write("\n".join(result))
+
+
+def get_parser():
+    parser = argparse.ArgumentParser(description="Clean up CMakeLists.txt files.")
+    parser.add_argument(
+        "-i",
+        "--in-place",
+        action="store_true",
+        help="edit file(s) in-place",
+    )
+    parser.add_argument(
+        "files",
+        metavar="PATH",
+        nargs="+",
+        help="Files to process",
+    )
+    return parser
+
+
+def main():
+    parser = get_parser()
+    args = parser.parse_args()
+
+    for path in args.files:
+        tidy = CMakeTidy(path)
+        if args.in_place:
+            tidy.write()
+        else:
+            tidy.print()
+
+
+if __name__ == "__main__":
+    main()
