@@ -40,7 +40,7 @@ import re
 
 
 class CMakeTidy(object):
-    COMMANDS_CONDITIONS = ["if", "elseif", "else", "endif"]
+    COMMANDS_CONDITIONS = ["if", "elseif", "else", "endif", "function", "endfunction", "foreach", "endforeach", "macro", "endmacro"]
     COMMANDS_CLEAN_ARGS = ["else", "endif"]
     INDENT = 4
     RE_COMMAND = re.compile(r'^\s*(?P<command>\w+)\s*\((?P<args>.*[^)]?)\)?\w*$', re.VERBOSE)
@@ -121,13 +121,13 @@ class CMakeTidy(object):
 
             # commands
             if command:
-                if command in self.COMMANDS_CONDITIONS and command != "if":
+                if command in self.COMMANDS_CONDITIONS and command not in ("if", "function", "foreach", "macro"):
                     self.check_unindent(indent, line, result)
                     indent -= self.INDENT
 
                 result.append("%s%s" % (" " * indent, self.fix_command(line)))
 
-                if command in self.COMMANDS_CONDITIONS and command != "endif":
+                if command in self.COMMANDS_CONDITIONS and command not in ("endif", "endfunction", "endforeach", "endmacro"):
                     indent += self.INDENT
                 elif not self.has_trailing_parenthesis(line):
                     indent += self.INDENT
